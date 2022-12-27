@@ -136,6 +136,7 @@ function getGpt3Message(prompt) {
       // 0.5と指定すると生成される文章は入力となる文章に似たものが多くなる傾向があります。
       // 逆に、temperatureフィールドに1.0と指定すると、生成される文章は、より多様なものになる傾向があります。
     temperature: 0.5,
+    stop:["\nAI:","\nHuman:"]
   };
   // HTTPリクエストで使用するオプション
   var options = {
@@ -199,10 +200,10 @@ function checkUsageThisMonth() {
 }
 
 function makePrompt(messages){
-  var prompt = `以下はAIアシスタントとの対話です。アシスタントは非常に賢いです。AIの回答は長くても140文字以内になります。140文字以内で回答しきれない場合、「続く..」というメッセージで終え、Humanが続けるよう促すと、その続きから回答を行います。\n`
+  var prompt = `以下はAIアシスタントとの対話です。アシスタントは簡潔かつ丁寧に受け答えします。AIの回答は長くても140文字以内になります。140文字以内で回答しきれない場合、「--続く--」というメッセージで終え、人間が続けるよう促すと、その続きから回答を行います。\n`
   + messages.join('\n')
-  + `AI:`;
-  //console.log(prompt)
+  + `\nAI:`;
+  console.log(prompt)
 
   return prompt
 }
