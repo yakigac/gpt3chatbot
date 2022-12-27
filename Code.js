@@ -61,14 +61,26 @@ function handleEvent(event) {
     // コマンドを判定する
     if (command == "/usage") {
       const usage = checkUsageThisMonth();
-      sendMessage("$"+usage.current_usage_usd, slackEvent.channel);
+      sendMessage("今月の使用量は$"+usage.current_usage_usd+"です。", slackEvent.channel);
     }
-    else if (command == "/gpt3" && array.length > 2) {
-      // gpt3コマンドの場合は、GPT3のレスポンスを返す
-      message = array[2];
-      // promtを作成
-      const prompt = makePrompt(message);
-      sendMessage(getGpt3Message(prompt), slackEvent.channel);
+    else if(command == "/clear"){
+      const cacheKey = slackEvent.channel;
+      const cache = CacheService.getScriptCache();
+      cache.remove(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
+      sendMessage("記憶喪失になりました！", slackEvent.channel);
+    }
+    else if (array.length > 1) {
+      message = array[1];
+
+      // promtを作成（同じチャンネルでの会話は10分以内なら覚えている）
+      const cacheKey = slackEvent.channel;
+      const messages = getAndSetMessages(cacheKey, "Human:"+message);
+
+      const prompt = makePrompt(messages);
+      ai_message = getGpt3Message(prompt);
+
+      getAndSetMessages(cacheKey, "AI:"+ai_message);
+      sendMessage(ai_message, slackEvent.channel);
     }
     else{
       sendMessage("知らないコマンドです。。", slackEvent.channel);
@@ -139,11 +151,10 @@ function getGpt3Message(prompt) {
       // レスポンスを取得する
       var json=JSON.parse(response.getContentText());
       // GPT-3からのレスポンスを返す
-      console.log("gpt3 responce");
-      console.log(json["choices"][0]["text"]);
-      return json["choices"][0]["text"];
+      const response_text = json["choices"][0]["text"];
+      return response_text;
   } catch(e) {
-    console.log('error');
+    console.error(e);
   }
 }
 
@@ -187,9 +198,26 @@ function checkUsageThisMonth() {
   return usage
 }
 
-function makePrompt(message){
-  var prompt = `以下はAIアシスタントとの対話です。アシスタントは創造的で、賢いです。AIの回答は140文字以内になります。\n`
-  + `Human:` + message
+function makePrompt(messages){
+  var prompt = `以下はAIアシスタントとの対話です。アシスタントは非常に賢いです。AIの回答は長くても140文字以内になります。140文字以内で回答しきれない場合、「続く..」というメッセージで終え、Humanが続けるよう促すと、その続きから回答を行います。\n`
+  + messages.join('\n')
   + `AI:`;
+  //console.log(prompt)
+
   return prompt
+}
+
+function getAndSetMessages(cacheKey, newMessage){
+  const cache = CacheService.getScriptCache();
+  const prevMessagesString = cache.get(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
+  var messages = JSON.parse(prevMessagesString);
+  if(messages == null){
+    messages = [];
+  }
+  messages.push(newMessage)
+
+  const messagesString = JSON.stringify(messages);
+  cache.put(cacheKey, messagesString, 600);
+
+  return messages
 }
