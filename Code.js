@@ -64,9 +64,11 @@ function handleEvent(event) {
       sendMessage("$"+usage.current_usage_usd, slackEvent.channel);
     }
     else if (command == "/gpt3" && array.length > 2) {
-      message = array[2];
       // gpt3コマンドの場合は、GPT3のレスポンスを返す
-      sendMessage(getGpt3Message(message), slackEvent.channel);
+      message = array[2];
+      // promtを作成
+      const prompt = makePrompt(message);
+      sendMessage(getGpt3Message(prompt), slackEvent.channel);
     }
     else{
       sendMessage("知らないコマンドです。。", slackEvent.channel);
@@ -98,7 +100,7 @@ function sendMessage(message, channel) {
  * @param {string} message - 送信するメッセージ
  * @return {string} GPT-3からのレスポンス
  */
-function getGpt3Message(message) {
+function getGpt3Message(prompt) {
   // GPT-3のエンドポイントURL
   var uri = 'https://api.openai.com/v1/completions';
   // OpenAIのAPIキー
@@ -109,10 +111,6 @@ function getGpt3Message(message) {
     'Authorization': 'Bearer '+ token, // APIキーを指定する
     'Content-type': 'application/json' // データ形式を指定する
   };
-
-  var prompt = `以下はAIアシスタントとの対話です。アシスタントは創造的で、賢いです。AIの回答は140文字以内になります。\n`
-    + `Human:` + message
-    + `AI:`;
 
   // リクエストのボディを作成
   const requestBody = {
@@ -187,4 +185,11 @@ function checkUsageThisMonth() {
   // 使用量を表示
   Logger.log(usage);
   return usage
+}
+
+function makePrompt(message){
+  var prompt = `以下はAIアシスタントとの対話です。アシスタントは創造的で、賢いです。AIの回答は140文字以内になります。\n`
+  + `Human:` + message
+  + `AI:`;
+  return prompt
 }
