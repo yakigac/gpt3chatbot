@@ -69,7 +69,7 @@ function handleEvent(event) {
     }
     else if (command == "/store") {
       const channel = slackEvent.channel;
-      const messages = getAndSetMessages(channel, null);
+      const messages = getAndPushMessages(channel, null);
       const prompt = makePrompt(messages, "");
       postMessageSnippet(prompt, channel);
     }
@@ -78,12 +78,12 @@ function handleEvent(event) {
 
       // promtを作成（同じチャンネルでの会話は10分以内なら覚えている）
       const cacheKey = slackEvent.channel;
-      const messages = getAndSetMessages(cacheKey, "Human:" + message);
+      const messages = getAndPushMessages(cacheKey, "Human:" + message);
 
       const prompt = makePrompt(messages);
       ai_message = getGpt3Message(prompt);
 
-      getAndSetMessages(cacheKey, "AI:" + ai_message);
+      getAndPushMessages(cacheKey, "AI:" + ai_message);
       sendMessage(ai_message, slackEvent.channel);
     }
     else {
@@ -214,9 +214,10 @@ function makePrompt(messages, aiPrefix = "AI:") {
   return prompt
 }
 
-function getAndSetMessages(cacheKey, newMessage) {
+function getAndPushMessages(cacheKey, newMessage) {
   const cache = CacheService.getScriptCache();
   const prevMessagesString = cache.get(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
+  // キャッシュには文字列で入っているため、パースして、配列として取得する。
   var messages = JSON.parse(prevMessagesString);
   if (messages == null) {
     messages = [];
@@ -225,6 +226,7 @@ function getAndSetMessages(cacheKey, newMessage) {
     messages.push(newMessage)
   }
 
+  // 配列を文字列化して、保存する。
   const messagesString = JSON.stringify(messages);
   cache.put(cacheKey, messagesString, 600);
 
