@@ -3,7 +3,7 @@
 
   参考にした記事：
   - https://qiita.com/paranishian/items/9cb754683584c6c05164
-  - https://qiita.com/noritsune/items/c4d58bc933198cfa101e#4-gas%E3%81%A8slack%E3%82%A2%E3%83%97%E3%83%AA%E3%82%92%E9%80%A3%E6%90%BA%E3%81%99%E3%82%8B
+  - https://qiita.com/noritsune/items/c4d58bc933198cfa101e
 */
 
 
@@ -132,7 +132,7 @@ function getGpt3Message(prompt) {
     prompt: prompt, // プロンプトを指定する
     // 生成される文章の最大トークン数を指定。単語数というような意味
     // 1000辺り$0.02なので少なくしておく
-    max_tokens: 300,
+    max_tokens: 500,
       // 0.5と指定すると生成される文章は入力となる文章に似たものが多くなる傾向があります。
       // 逆に、temperatureフィールドに1.0と指定すると、生成される文章は、より多様なものになる傾向があります。
     temperature: 0.5,
@@ -142,7 +142,6 @@ function getGpt3Message(prompt) {
   var options = {
     'muteHttpExceptions' : true, // HTTPエラーを無視する
     'headers': headers, // ヘッダーを指定する
-    'Content-type': 'application/json', // データ形式を指定する
     'method': 'POST', // HTTPメソッドを指定する
     'payload': JSON.stringify(requestBody),// リクエストボディを指定する
   };
@@ -200,7 +199,11 @@ function checkUsageThisMonth() {
 }
 
 function makePrompt(messages){
-  var prompt = `以下はAIアシスタントとの対話です。アシスタントは簡潔かつ丁寧に受け答えします。AIの回答は長くても140文字以内になります。140文字以内で回答しきれない場合、「--続く--」というメッセージで終え、人間が続けるよう促すと、その続きから回答を行います。\n`
+  var prompt = `以下はAIアシスタントとの対話です。アシスタントは簡潔に受け答えします。AIは以下ルールを守ります。
+  1. プログラムを記載する際はslackのコードブロックで囲む。
+  2. 回答は原則140文字以内に収める。もし140文字以内で回答しきれない場合、改行後に「続けてもよろしいでしょうか？」というメッセージで回答を終える。
+  3. Humanが明示的に許可している場合、2の140文字ではなく、500文字以内で回答する。
+  `
   + messages.join('\n')
   + `\nAI:`;
   console.log(prompt)
