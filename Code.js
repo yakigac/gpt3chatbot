@@ -32,7 +32,7 @@ function isDuplicateSlackEvent(slackEvent){
     return true
   }
   else{
-    cache.put(cacheKey, true, 60); // trueをcachKeyでキャッシュする（単位sec）
+    cache.put(cacheKey, true, 60); // trueをcacheKeyでキャッシュする（単位sec）
   }
   return false
 }
@@ -50,13 +50,11 @@ function handleEvent(event) {
   if (slackEvent.type == "app_mention") {
 
     // メンションイベントの場合は、メンションされたテキストを取得する
-    var text = slackEvent.text;
+    const text = slackEvent.text;
 
     // メンションされたテキストから、コマンドを取得する
-    var array = text.split(" ");
-    if(array.length > 1){
-        var command = array[1];
-    }
+    const array = text.split(" ");
+    const command = (array.length > 1 ? array[1] : null)
 
     // コマンドを判定する
     if (command == "/usage") {
@@ -67,10 +65,16 @@ function handleEvent(event) {
       const cacheKey = slackEvent.channel;
       const cache = CacheService.getScriptCache();
       cache.remove(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
-      sendMessage("記憶喪失になりました！", slackEvent.channel);
+      sendMessage("記憶喪失しました。。", slackEvent.channel);
+    }
+    else if(command == "/store"){
+      const channel = slackEvent.channel;
+      const messages = getAndSetMessages(channel, null);
+      const prompt = makePrompt(messages, "");
+      postMessageSnippet(prompt, channel);
     }
     else if (array.length > 1) {
-      message = array[1];
+      const message = array.slice(1).join(" "); // 特殊命令でない場合は文字列すべてをGPT3に投げる
 
       // promtを作成（同じチャンネルでの会話は10分以内なら覚えている）
       const cacheKey = slackEvent.channel;
@@ -83,7 +87,7 @@ function handleEvent(event) {
       sendMessage(ai_message, slackEvent.channel);
     }
     else{
-      sendMessage("知らないコマンドです。。", slackEvent.channel);
+      sendMessage("すみません、よくわからないです。。", slackEvent.channel);
     }
     
   }
@@ -194,19 +198,18 @@ function checkUsageThisMonth() {
   const usage = JSON.parse(json);
 
   // 使用量を表示
-  Logger.log(usage);
+  console.log(usage);
   return usage
 }
 
-function makePrompt(messages){
+function makePrompt(messages, aiPrefix="AI:"){
   var prompt = `以下はAIアシスタントとの対話です。アシスタントは簡潔に受け答えします。AIは以下ルールを守ります。
   1. プログラムを記載する際はslackのコードブロックで囲む。
-  2. 回答は原則140文字以内に収める。もし140文字以内で回答しきれない場合、改行後に「続けてもよろしいでしょうか？」というメッセージで回答を終える。
-  3. Humanが明示的に許可している場合、2の140文字ではなく、500文字以内で回答する。
-  `
+  2. 回答は原則140文字以内に収める。もし140文字以内で回答しきれない場合は改行後に「続けてもよろしいでしょうか？」というメッセージで問いかけを行い、Humanの返答を待つ。
+  3. Humanが明示的に許可している場合、2の140文字ではなく、500文字以内で回答する。\n`
   + messages.join('\n')
-  + `\nAI:`;
-  console.log(prompt)
+  + `\n`
+  + aiPrefix;
 
   return prompt
 }
@@ -218,10 +221,43 @@ function getAndSetMessages(cacheKey, newMessage){
   if(messages == null){
     messages = [];
   }
-  messages.push(newMessage)
+  if(newMessage!=null){
+    messages.push(newMessage)
+  }
 
   const messagesString = JSON.stringify(messages);
   cache.put(cacheKey, messagesString, 600);
 
   return messages
+}
+
+function postMessageSnippet(message, channel){
+  // Slack APIのトークンを取得する
+  const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
+
+  //Jsonのペイロードに格納  
+  var payload = {
+    "token" : token,
+    "channels" : channel,
+    'content' : message,//メッセージの中身
+    'filename':"prompt.txt",//テキスト形式のファイルを指定
+    //'initial_comment': msgFrom,//ファイルのコメント"
+    'title': "Messages" //"Slack上でのファイルのタイトル"
+  };
+  var options = {
+    "method" : "post",
+    "headers": {
+      "Authorization": "Bearer " + token
+    },
+    'contentType': 'application/x-www-form-urlencoded',
+    "payload" : payload
+  };
+
+  const uri = "https://slack.com/api/files.upload"
+  try {
+    // Postリクエストを送信する
+    UrlFetchApp.fetch(uri, options);
+  } catch(e) {
+    console.error(e);
+  }
 }
