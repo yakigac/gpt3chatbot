@@ -251,12 +251,10 @@ AI:
 {"command":"/talk","text":"こんにちは！","text_length":6,"filename":"","code":""}
 Human:pythonでハローワールド書きたい
 AI:
-{"command":"/code","text":"Pythonで"Hello, World!"を表示するには、次のようにプログラムを書くことができます。","text_length":51,"filename":"helloworld.py","code":"\\nprint(\"Hello, World!\")\\n"}
+{"command":"/code","text":"Pythonで"Hello, World!"を表示するには、次のようにプログラムを書くことができます。","text_length":51,"filename":"helloworld.py","code":"print(\"Hello, World!\")\\n"}
 Human:全部小文字にして
 AI:
-{"command":"/code","text":"すべて小文字にしました。","text_length":51,"filename":"helloworld_uppercase.py","code":"
-print(\"hello, world!\")
-"}
+{"command":"/code","text":"すべて小文字にしました。","text_length":51,"filename":"helloworld_uppercase.py","code":"print(\"hello, world!\")\\n"}
 Human:今月のAPI使用量を教えて
 AI:
 {"command":"/usage","text":"今月のAPI使用量を調査しました。","text_length":17,"filename":"","code":""}
