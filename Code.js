@@ -70,7 +70,7 @@ function handleEvent(event) {
     else if (command == "/store") {
       const channel = slackEvent.channel;
       const messages = getAndPushMessages(channel, null);
-      const prompt = makePrompt(messages, "");
+      const prompt = makeConversationPrompt(messages, "");
       postMessageSnippet(prompt, channel);
     }
     else if (array.length > 1) {
@@ -80,17 +80,53 @@ function handleEvent(event) {
       const cacheKey = slackEvent.channel;
       const messages = getAndPushMessages(cacheKey, "Human:" + message);
 
-      const prompt = makePrompt(messages);
-      ai_message = getGpt3Message(prompt);
+      const prompt = makeConversationPrompt(messages);
+      const ai_message = getGpt3Message(prompt);
 
-      getAndPushMessages(cacheKey, "AI:" + ai_message);
-      sendMessage(ai_message, slackEvent.channel);
+      handleAIMessage(ai_message, slackEvent);
+
+      getAndPushMessages(cacheKey, "AI:" + JSON.stringify(ai_message));
     }
     else {
       sendMessage("すみません、よくわからないです。。", slackEvent.channel);
     }
 
   }
+}
+
+function handleAIMessage(ai_message_json, slackEvent) {
+  var command = "";
+  var text = "";
+  var code = "";
+  console.log(ai_message_json);
+  try {
+		ai_message = JSON.parse(ai_message_json);
+    command = ai_message.command;
+    text = ai_message.text;
+    code = ai_message.code;
+    filename = ai_message.filename;
+	} catch (error) {
+    console.warn(error);
+		return false;
+	}
+
+  console.log(command);
+  // コマンドを判定する
+  if (command == "/usage") {
+    const usage = checkUsageThisMonth();
+    sendMessage("今月の使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel);
+  }
+  else if (command == "/code"){
+    sendMessage(text, slackEvent.channel);
+    postMessageSnippet(code, slackEvent.channel, filename);
+  }
+  else if (command == "/talk"){
+    sendMessage(text, slackEvent.channel);
+  }
+  else {
+    sendMessage("すみません、よくわからないです。。", slackEvent.channel);
+  }
+  return true;
 }
 
 function sendMessage(message, channel) {
@@ -202,11 +238,30 @@ function checkUsageThisMonth() {
   return usage
 }
 
-function makePrompt(messages, aiPrefix = "AI:") {
-  var prompt = `以下はAIアシスタントとの対話です。アシスタントは簡潔に受け答えします。AIは以下ルールを守ります。
+function makeConversationPrompt(messages, aiPrefix = "AI:") {
+  var prompt = `以下はAIアシスタントとの対話です。アシスタントは簡潔に受け答えします。AIは以下ルールを守ります。（数字が大きいほど重要）
   1. プログラムを記載する際はslackのコードブロックで囲む。
   2. 回答は原則140文字以内に収める。もし140文字以内で回答しきれない場合は改行後に「続けてもよろしいでしょうか？」というメッセージで問いかけを行い、Humanの返答を待つ。
-  3. Humanが明示的に許可している場合、2の140文字ではなく、500文字以内で回答する。\n`
+  3. Humanが明示的に許可している場合、2の140文字ではなく、500文字以内で回答する。
+  4. AIの回答はその後別のプログラムで処理されるため、command, text, text_length,code,filenameという項目を持ったjson形式で返される。（JSONの規約に沿ってエスケープシーケンスを使用する）
+  5. commandには、プログラムコードを含む場合/code、OpenAIのAPI使用量について聞かれている場合/usage、その他の場合/talkを設定する\n
+--例--
+Human:こんにちは
+AI:
+{"command":"/talk","text":"こんにちは！","text_length":6,"filename":"","code":""}
+Human:pythonでハローワールド書きたい
+AI:
+{"command":"/code","text":"Pythonで"Hello, World!"を表示するには、次のようにプログラムを書くことができます。","text_length":51,"filename":"helloworld.py","code":"\\nprint(\"Hello, World!\")\\n"}
+Human:全部小文字にして
+AI:
+{"command":"/code","text":"すべて小文字にしました。","text_length":51,"filename":"helloworld_uppercase.py","code":"
+print(\"hello, world!\")
+"}
+Human:今月のAPI使用量を教えて
+AI:
+{"command":"/usage","text":"今月のAPI使用量を調査しました。","text_length":17,"filename":"","code":""}
+
+--ここから実際の会話履歴--\n`
     + messages.join('\n')
     + `\n`
     + aiPrefix;
@@ -233,7 +288,7 @@ function getAndPushMessages(cacheKey, newMessage) {
   return messages
 }
 
-function postMessageSnippet(message, channel) {
+function postMessageSnippet(message, channel, filename="sample.txt") {
   // Slack APIトークンをスクリプトプロパティから取得する
   const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
   // Slack APIのfiles.uploadエンドポイント
@@ -243,9 +298,9 @@ function postMessageSnippet(message, channel) {
   var payload = {
     "token": token, // Slack APIトークン
     "channels": channel, // 投稿先のチャンネルID
-    'content': message, // メッセージの中身
-    'filename': "prompt.txt", // テキスト形式のファイルを指定
-    'title': "Messages" // Slack上でのファイルのタイトル
+    "content": message, // メッセージの中身
+    "filename": filename, // テキスト形式のファイルを指定
+    "title": "Messages" // Slack上でのファイルのタイトル
   };
 
   // Slack APIへのリクエストで使用するオプションを設定する
@@ -254,7 +309,7 @@ function postMessageSnippet(message, channel) {
     "headers": {
       "Authorization": "Bearer " + token // Slack APIトークンを使用する
     },
-    'contentType': 'application/x-www-form-urlencoded', // コンテンツタイプを指定する
+    "contentType": 'application/x-www-form-urlencoded', // コンテンツタイプを指定する
     "payload": payload // リクエストペイロードを設定する
   };
 
