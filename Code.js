@@ -104,7 +104,7 @@ function handleAiResponse(message, slackEvent) {
   const ts = slackEvent.thread_ts || slackEvent.ts;
 
   // AIのメッセージの一行目から、人間への返信orAgentへのメッセージ、Agentへのメッセージであればどういった命令かを抽出。
-  const message_array = message.split("\n");
+  const message_array = message.trim().split("\n");
   const command_and_arguments = (message_array.length > 0 ? message_array[0] : null);
   const command_array = command_and_arguments.trim().split(" ");
   const to_whom = (command_array.length > 0 ? command_array[0] : null);
@@ -128,9 +128,9 @@ function handleAiResponse(message, slackEvent) {
       postMessage(message, slackEvent.channel, ts);
     }
   }
-  else if (to_whom == "/human" && message_array.length > 1) {
-    // 通常の返信では二行目以降のメッセージ全体を返す。
-    const message_to_human = message_array.slice(1).join("\n");
+  else if (to_whom == "/human") {
+    // 通常の返信ではコマンド以外すべてのメッセージを返す。
+    const message_to_human = command_array.slice(1).join(" ") + message_array.slice(1).join("\n");
     postMessage(message_to_human, slackEvent.channel, ts);
   }
   else {
@@ -256,7 +256,7 @@ function fetchUsageFromDec() {
 function makePrompt(messages, aiPrefix = "AI:") {
   const prompt = `以下はHumanと、AIと、Agentの対話です。AIはHumanに従順で、簡潔に受け答えし、必要に応じてAgentを利用します。AIは以下ルールを守ります。\n`
     + `- 返答の1行目は必ず/humanまたは/agentという形で、メッセージの種別とその引数（nullable）を記載する。\n`
-    + `- Humanに話しかける場合は、/humanという種別にしたうえで、二行目以降にメッセージを記載する。\n`
+    + `- Humanに話しかける場合は、/humanという種別にしたうえで、改行した後、二行目以降にメッセージを記載する。\n`
     + `- Agentに話しかける場合は、/agentという種別にする。\n`
     + `- Agentが実施できることであれば、積極的にAgentを活用する。\n`
     + `- プログラムコードを記載する場合、その説明はプログラム内のコメントとして記載する（2行目以降をそのまま実行できるようにする）。\n`
