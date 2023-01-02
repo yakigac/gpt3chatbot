@@ -82,7 +82,7 @@ function handleEvent(event) {
       const messages = getAndPushMessages(cacheKey, "Human:" + message);
 
       const prompt = makePrompt(messages);
-      const ai_message = getGpt3Message(prompt);
+      const ai_message = fetchGpt3Message(prompt);
 
       getAndPushMessages(cacheKey, "AI:" + ai_message);
       handleAiResponse(ai_message, slackEvent);
@@ -139,7 +139,7 @@ function sendMessage(message, channel, event_ts) {
  * @param {string} message - 送信するメッセージ
  * @return {string} GPT-3からのレスポンス
  */
-function getGpt3Message(prompt) {
+function fetchGpt3Message(prompt) {
   // GPT-3のエンドポイントURL
   const uri = 'https://api.openai.com/v1/completions';
   // OpenAIのAPIキー
@@ -163,7 +163,7 @@ function getGpt3Message(prompt) {
     // 0.5と指定すると生成される文章は入力となる文章に似たものが多くなる傾向があります。
     // 逆に、temperatureフィールドに1.0と指定すると、生成される文章は、より多様なものになる傾向があります。
     temperature: 0.1,
-    stop: ["\nAI:", "\nHuman:"]
+    stop: ["\nAI:", "\nHuman:"] // AIが一人で会話を続けないようにします。
   };
   // HTTPリクエストで使用するオプション
   const options = {
