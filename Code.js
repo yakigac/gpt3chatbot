@@ -73,7 +73,7 @@ function handleEvent(event) {
     else if (command == "/store") {
       const messages = getAndPushMessages(slackEvent.channel, null);
       const prompt = makePrompt(messages, "");
-      postMessageSnippet(prompt, slackEvent.channel, ts);
+      postSnippet(prompt, slackEvent.channel, ts);
     }
     else if (array.length > 1) {
       const message = array.slice(1).join(" "); // 特殊命令でない場合は文字列すべてをGPT3に投げる
@@ -111,7 +111,6 @@ function handleAiResponse(message, slackEvent) {
   const tool = (command_array.length > 1 ? command_array[1] : null);
   const arguments = (command_array.length > 2 ? command_array.slice(2) : []);
 
-  console.log("message_array:", message_array);
   // コマンドを判定する
   if (to_whom == "/agent") {
     if (tool == "code_reply" && message_array.length > 1) {
@@ -119,11 +118,13 @@ function handleAiResponse(message, slackEvent) {
       const code = message_array.slice(1).join("\n");
 
       // codeだったらスニペットで返す
-      postMessageSnippet(code, slackEvent.channel, ts, filename);
+      postSnippet(code, slackEvent.channel, ts, filename);
     }
     else {
       // 未定義処理（現状はメッセージ全体を返す）
-      console.warn("未定義の命令が設定されました。command_array:", command_array);
+      console.warn("未定義の命令が設定されました。");
+      console.warn("command_array:", command_array);
+      console.warn("message_array:", message_array);
       postMessage(message, slackEvent.channel, ts);
     }
   }
@@ -134,7 +135,8 @@ function handleAiResponse(message, slackEvent) {
   }
   else {
     // 未定義処理（現状はメッセージ全体を返す）
-    console.warn("未定義の送信先が設定されました。message_array:", message_array);
+    console.warn("未定義の送信先が設定されました。");
+    console.warn("message_array:", message_array);
     postMessage(message, slackEvent.channel, ts);
   }
 }
@@ -290,7 +292,7 @@ function getAndPushMessages(cacheKey, newMessage) {
   return messages
 }
 
-function postMessageSnippet(message, channel, event_ts, filename = "sample.txt", initial_comment) {
+function postSnippet(content, channel, event_ts, filename = "sample.txt", initial_comment) {
   // Slack APIトークンをスクリプトプロパティから取得する
   const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
   // Slack APIのfiles.uploadエンドポイント
@@ -300,7 +302,7 @@ function postMessageSnippet(message, channel, event_ts, filename = "sample.txt",
   var payload = {
     "token": token, // Slack APIトークン
     "channels": channel, // 投稿先のチャンネルID
-    'content': message, // メッセージの中身
+    'content': content, // メッセージの中身
     'initial_comment': initial_comment,
     'filename': filename, // テキスト形式のファイルを指定
     'title': filename, // Slack上でのファイルのタイトル
