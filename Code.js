@@ -61,13 +61,13 @@ function handleEvent(event) {
     // コマンドを判定する
     if (command == "/usage") {
       const usage = checkUsageThisMonth();
-      sendMessage("これまでの使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel, slackEvent.event_ts);
+      postMessage("これまでの使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel, slackEvent.event_ts);
     }
     else if (command == "/clear") {
       const cacheKey = slackEvent.channel;
       const cache = CacheService.getScriptCache();
       cache.remove(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
-      sendMessage("記憶喪失しました。。", slackEvent.channel, slackEvent.event_ts);
+      postMessage("記憶喪失しました。。", slackEvent.channel, slackEvent.event_ts);
     }
     else if (command == "/store") {
       const messages = getAndPushMessages(slackEvent.channel, null);
@@ -89,7 +89,7 @@ function handleEvent(event) {
       //sendMessage(ai_message, slackEvent.channel, slackEvent.event_ts);
     }
     else {
-      sendMessage("すみません、よくわからないです。。", slackEvent.channel);
+      postMessage("すみません、よくわからないです。。", slackEvent.channel);
     }
 
   }
@@ -107,15 +107,15 @@ function handleAiResponse(message, slackEvent) {
   }
   else if (command == "/reply") {
     // 人間への返信ではメッセージ全体を返す。
-    sendMessage(message, slackEvent.channel, slackEvent.event_ts);
+    postMessage(message, slackEvent.channel, slackEvent.event_ts);
   }
   else {
     console.warn("message_array:", message_array);
-    sendMessage(message, slackEvent.channel, slackEvent.event_ts);
+    postMessage(message, slackEvent.channel, slackEvent.event_ts);
   }
 }
 
-function sendMessage(message, channel, event_ts) {
+function postMessage(message, channel, event_ts) {
   // Slack APIのトークンを取得する
   const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
 
