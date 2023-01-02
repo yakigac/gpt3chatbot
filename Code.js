@@ -40,6 +40,7 @@ function isDuplicateSlackEvent(slackEvent) {
 function handleEvent(event) {
   // Slackから送信されたイベントを取得する
   const slackEvent = event.event;
+  const ts = slackEvent.thread_ts || slackEvent.ts;
 
   if (isDuplicateSlackEvent(slackEvent)) {
     console.log('重複クエリのため、何もせず終了します。');
@@ -60,19 +61,19 @@ function handleEvent(event) {
 
     // コマンドを判定する
     if (command == "/usage") {
-      const usage = checkUsageThisMonth();
-      postMessage("これまでの使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel, slackEvent.event_ts);
+      const usage = fetchUsageFromDec();
+      postMessage("これまでの使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel, ts);
     }
     else if (command == "/clear") {
       const cacheKey = slackEvent.channel;
       const cache = CacheService.getScriptCache();
       cache.remove(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
-      postMessage("記憶喪失しました。。", slackEvent.channel, slackEvent.event_ts);
+      postMessage("記憶喪失しました。。", slackEvent.channel, ts);
     }
     else if (command == "/store") {
       const messages = getAndPushMessages(slackEvent.channel, null);
       const prompt = makePrompt(messages, "");
-      postMessageSnippet(prompt, slackEvent.channel, slackEvent.event_ts);
+      postMessageSnippet(prompt, slackEvent.channel, ts);
     }
     else if (array.length > 1) {
       const message = array.slice(1).join(" "); // 特殊命令でない場合は文字列すべてをGPT3に投げる
@@ -86,7 +87,7 @@ function handleEvent(event) {
 
       getAndPushMessages(cacheKey, "AI:" + ai_message);
       handleAiResponse(ai_message, slackEvent);
-      //sendMessage(ai_message, slackEvent.channel, slackEvent.event_ts);
+      //sendMessage(ai_message, slackEvent.channel, ts);
     }
     else {
       postMessage("すみません、よくわからないです。。", slackEvent.channel);
@@ -96,22 +97,45 @@ function handleEvent(event) {
 }
 
 function handleAiResponse(message, slackEvent) {
-  // Slackでのイベントの種類を判定する
+  // AIの返信の種類と含まれる命令を判定する
+  // AIのメッセージの一行目には/agent XX YYのようなエージェントへの命令か、/humanという人間への返信かを区別する情報を含む。
+  // これを処理して適切なアウトプットにつなげる。
+
+  const ts = slackEvent.thread_ts || slackEvent.ts;
+
+  // AIのメッセージの一行目から、人間への返信orAgentへのメッセージ、Agentへのメッセージであればどういった命令かを抽出。
   const message_array = message.split("\n");
-  const command = (message_array.length > 0 ? message_array[0].trim() : null)
+  const command_and_arguments = (message_array.length > 0 ? message_array[0] : null);
+  const command_array = command_and_arguments.trim().split(" ");
+  const to_whom = (command_array.length > 0 ? command_array[0] : null);
+  const tool = (command_array.length > 1 ? command_array[1] : null);
+  const arguments = (command_array.length > 2 ? command_array.slice(2) : []);
+
+  console.log("message_array:", message_array);
   // コマンドを判定する
-  if (command == "/code" && message_array.length > 1) {
-    const code = message_array.slice(1).join("\n");
-    // codeだったらスニペットで返す
-    postMessageSnippet(code, slackEvent.channel, slackEvent.event_ts);
+  if (to_whom == "/agent") {
+    if (tool == "code_reply" && message_array.length > 1) {
+      const filename = arguments.length > 0 ? arguments[0] : null;
+      const code = message_array.slice(1).join("\n");
+
+      // codeだったらスニペットで返す
+      postMessageSnippet(code, slackEvent.channel, ts, filename);
+    }
+    else {
+      // 未定義処理（現状はメッセージ全体を返す）
+      console.warn("未定義の命令が設定されました。command_array:", command_array);
+      postMessage(message, slackEvent.channel, ts);
+    }
   }
-  else if (command == "/reply") {
-    // 人間への返信ではメッセージ全体を返す。
-    postMessage(message, slackEvent.channel, slackEvent.event_ts);
+  else if (to_whom == "/human" && message_array.length > 1) {
+    // 通常の返信では二行目以降のメッセージ全体を返す。
+    const message_to_human = message_array.slice(1).join("\n");
+    postMessage(message_to_human, slackEvent.channel, ts);
   }
   else {
-    console.warn("message_array:", message_array);
-    postMessage(message, slackEvent.channel, slackEvent.event_ts);
+    // 未定義処理（現状はメッセージ全体を返す）
+    console.warn("未定義の送信先が設定されました。message_array:", message_array);
+    postMessage(message, slackEvent.channel, ts);
   }
 }
 
@@ -185,7 +209,7 @@ function fetchGpt3Message(prompt) {
   }
 }
 
-function checkUsageThisMonth() {
+function fetchUsageFromDec() {
   // GPT-3 の API キー
   const apiKey = PropertiesService.getScriptProperties().getProperty("OPENAI_SECRET_KEY");
 
@@ -197,7 +221,7 @@ function checkUsageThisMonth() {
 
   // 今月の1日をYYYY-MM-DDで取得。
   // const startDate = Utilities.formatDate(startOfMonth, "Asia/Tokyo", "yyyy-MM-dd");
-  const startDate = "2022-01-01"
+  const startDate = "2022-12-01"
 
   // 現在の日時をYYYY-MM-DDで取得。
   const endDate = Utilities.formatDate(now, "Asia/Tokyo", "yyyy-MM-dd");
@@ -228,10 +252,18 @@ function checkUsageThisMonth() {
 }
 
 function makePrompt(messages, aiPrefix = "AI:") {
-  const prompt = `以下はAIアシスタントとの対話です。AIアシスタントは簡潔に受け答えし、必要に応じて補足情報を求めることもあります。AIは以下ルールを守ります。\n`
-    + `1. 返答の1行目は必ず/replyまたは/codeという形で、メッセージの種別を記載する。\n`
-    + `2. プログラムコードを記載する場合は、種別を/codeとして、説明はプログラム内のコメントとして記載する（2行目以降をそのまま実行できるようにする）。\n`
-    + `3. 回答はプログラムコード部分を除いて、原則140文字以内に収める。140文字を超える場合はHumanに許可を求める。\n\n`
+  const prompt = `以下はHumanと、AIと、Agentの対話です。AIはHumanに従順で、簡潔に受け答えし、必要に応じてAgentを利用します。AIは以下ルールを守ります。\n`
+    + `- 返答の1行目は必ず/humanまたは/agentという形で、メッセージの種別とその引数（nullable）を記載する。\n`
+    + `- Humanに話しかける場合は、/humanという種別にしたうえで、二行目以降にメッセージを記載する。\n`
+    + `- Agentに話しかける場合は、/agentという種別にする。\n`
+    + `- Agentが実施できることであれば、積極的にAgentを活用する。\n`
+    + `- プログラムコードを記載する場合、その説明はプログラム内のコメントとして記載する（2行目以降をそのまま実行できるようにする）。\n`
+    + `- 回答はプログラムコード部分を除いて、原則140文字以内に収める。この制限を超える場合はHumanに許可を求める。\n`
+    + `---\n`
+    + `Agentは以下ができます。\n`
+    + `- "/agent multiply X Y"のようなインプットがあった場合、XとYの積を計算して返す。\n`
+    + `- "/agent code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEは適切なファイル名を渡す必要がある。\n`
+    + `---\n`
     + messages.join('\n')
     + `\n`
     + aiPrefix;
@@ -258,7 +290,7 @@ function getAndPushMessages(cacheKey, newMessage) {
   return messages
 }
 
-function postMessageSnippet(message, channel, event_ts, initial_comment, filename = "sample.txt") {
+function postMessageSnippet(message, channel, event_ts, filename = "sample.txt", initial_comment) {
   // Slack APIトークンをスクリプトプロパティから取得する
   const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
   // Slack APIのfiles.uploadエンドポイント
