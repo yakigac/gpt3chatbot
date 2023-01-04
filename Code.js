@@ -9,15 +9,15 @@
 
 function doPost(e) {
   // Slackからのイベントを取得する
-  const event = JSON.parse(e.postData.contents);
+  const slackEvent = JSON.parse(e.postData.contents);
 
   // Slackからのイベントの種類を判定する
-  if (event.type == "url_verification") {
+  if (slackEvent.type == "url_verification") {
     // URLの検証イベントの場合は、challengeパラメータを返す
-    return ContentService.createTextOutput(event.challenge).setMimeType(ContentService.MimeType.PLAIN_TEXT);
-  } else if (event.type == "event_callback") {
+    return ContentService.createTextOutput(slackEvent.challenge).setMimeType(ContentService.MimeType.PLAIN_TEXT);
+  } else if (slackEvent.type == "event_callback") {
     // イベントコールバックイベントの場合は、イベントを処理する
-    return handleEvent(event);
+    return handleEvent(slackEvent);
   }
 }
 
@@ -104,41 +104,56 @@ function handleAiResponse(message, slackEvent) {
   const ts = slackEvent.thread_ts || slackEvent.ts;
 
   // AIのメッセージの一行目から、人間への返信orAgentへのメッセージ、Agentへのメッセージであればどういった命令かを抽出。
-  const message_array = message.trim().split("\n");
-  const command_and_arguments = (message_array.length > 0 ? message_array[0] : null);
-  const command_array = command_and_arguments.trim().split(" ");
-  const to_whom = (command_array.length > 0 ? command_array[0] : null);
-  const tool = (command_array.length > 1 ? command_array[1] : null);
-  const arguments = (command_array.length > 2 ? command_array.slice(2) : []);
+  const lines = message.trim().split("\n");
+  const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
+  const tool = (tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
+  const args = (tool_and_arguments.length > 1 ? tool_and_arguments.slice(1) : []);
 
   // コマンドを判定する
-  if (to_whom == "/agent") {
-    if (tool == "code_reply" && message_array.length > 1) {
-      const filename = arguments.length > 0 ? arguments[0] : null;
-      const code = message_array.slice(1).join("\n");
-
-      // codeだったらスニペットで返す
-      postSnippet(code, slackEvent.channel, ts, filename);
-    }
-    else {
-      // 未定義処理（現状はメッセージ全体を返す）
-      console.warn("未定義の命令が設定されました。");
-      console.warn("command_array:", command_array);
-      console.warn("message_array:", message_array);
-      postMessage(message, slackEvent.channel, ts);
-    }
-  }
-  else if (to_whom == "/human") {
-    // 通常の返信ではコマンド以外すべてのメッセージを返す。
-    const message_to_human = command_array.slice(1).join(" ") + message_array.slice(1).join("\n");
+  if (tool == "/reply") {
+    // 通常の返信ではコマンド行以外すべてのメッセージを返す。
+    const message_to_human = args.join(" ") + "\n" + lines.slice(1).join("\n");
     postMessage(message_to_human, slackEvent.channel, ts);
   }
-  else {
-    // 未定義処理（現状はメッセージ全体を返す）
-    console.warn("未定義の送信先が設定されました。");
-    console.warn("message_array:", message_array);
-    postMessage(message, slackEvent.channel, ts);
+  else if (tool == "/code_reply" && args.length > 0 && lines.length > 1) {
+    const filename = args.length > 0 ? args[0] : null;
+    const code = lines.slice(1).join("\n");
+
+    // スニペットで返す
+    postSnippet(code, slackEvent.channel, ts, filename);
   }
+  else if (tool == "/calc" && args.length > 2) {
+    // X*Y等の四則演算を計算して、メッセージで返す。
+    const x = parseFloat(args[0]);
+    const operator = args[1];
+    const y = parseFloat(args[2]);
+    const answer = calc_simple(x, operator, y);
+    postMessage(answer, slackEvent.channel, ts);
+  }
+  else {
+    // 未定義処理（現状は警告を出してメッセージ全体を返す）
+    console.warn("未定義の命令が設定されました。");
+    console.warn("tool_and_arguments:", tool_and_arguments);
+    console.warn("message:", lines);
+    postMessage(message + "\n(AIからの未定義命令検知)", slackEvent.channel, ts);
+  }
+}
+
+function calc_simple(x, operator, y) {
+  let answer = null;
+  if (operator == "+") {
+    answer = x + y;
+  }
+  else if (operator == "-") {
+    answer = x - y;
+  }
+  else if (operator == "*") {
+    answer = x * y;
+  }
+  else if (operator == "/" && y != 0) {
+    answer = x / y;
+  }
+  return answer;
 }
 
 function postMessage(message, channel, event_ts) {
@@ -189,7 +204,7 @@ function fetchGpt3Message(prompt) {
     // 0.5と指定すると生成される文章は入力となる文章に似たものが多くなる傾向があります。
     // 逆に、temperatureフィールドに1.0と指定すると、生成される文章は、より多様なものになる傾向があります。
     temperature: 0.1,
-    stop: ["\nAI:", "\nHuman:"] // AIが一人で会話を続けないようにします。
+    stop: ["\nAI:", "\nHuman:", "\nTool:"] // AIが一人で会話を続けないようにします。
   };
   // HTTPリクエストで使用するオプション
   const options = {
@@ -254,17 +269,16 @@ function fetchUsageFromDec() {
 }
 
 function makePrompt(messages, aiPrefix = "AI:") {
-  const prompt = `以下はHumanと、AIと、Agentの対話です。AIはHumanに従順で、簡潔に受け答えし、必要に応じてAgentを利用します。AIは以下ルールを守ります。\n`
-    + `- 返答の1行目は必ず/humanまたは/agentという形で、メッセージの種別とその引数（nullable）を記載する。\n`
-    + `- Humanに話しかける場合は、/humanという種別にしたうえで、改行した後、二行目以降にメッセージを記載する。\n`
-    + `- Agentに話しかける場合は、/agentという種別にする。\n`
-    + `- Agentが実施できることであれば、積極的にAgentを活用する。\n`
-    + `- プログラムコードを記載する場合、その説明はプログラム内のコメントとして記載する（2行目以降をそのまま実行できるようにする）。\n`
+  const prompt = `以下はHumanと、AIの対話です。AIは賢くHumanに従順で、簡潔に受け答えし、必要なtoolを利用して返答します。AIは以下ルールを守ります。\n`
+    + `- 返答の1行目は必ず/xxx args1 args2 ...等という形で、メッセージの種別と必要な引数を記載する。(xxxにはツール名、argsには必要な引数が入る)\n`
+    + `- toolが使える場合は、できる限り積極的にtoolを活用する。\n`
+    + `- プログラムコードを記載する場合、その説明はプログラム内のコメントとして記載する(2行目以降をそのまま実行できるようにする)。\n`
     + `- 回答はプログラムコード部分を除いて、原則140文字以内に収める。この制限を超える場合はHumanに許可を求める。\n`
     + `---\n`
-    + `Agentは以下ができます。\n`
-    + `- "/agent multiply X Y"のようなインプットがあった場合、XとYの積を計算して返す。\n`
-    + `- "/agent code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEは適切なファイル名を渡す必要がある。\n`
+    + `toolには、以下の種類が存在します。\n`
+    + `- "/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。\n`
+    + `- "/code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEには言語に応じた適切な拡張子をつけて渡す必要がある。\n`
+    + `- "/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には何も書いてはいけない。\n`
     + `---\n`
     + messages.join('\n')
     + `\n`
