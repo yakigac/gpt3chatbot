@@ -4,6 +4,7 @@
   参考にした記事：
   - https://qiita.com/paranishian/items/9cb754683584c6c05164
   - https://qiita.com/noritsune/items/c4d58bc933198cfa101e
+  - https://github.com/hwchase17/langchain/blob/master/LICENSE
 */
 
 
@@ -106,29 +107,22 @@ function handleAiResponse(message, slackEvent) {
   // AIのメッセージの一行目から、人間への返信orAgentへのメッセージ、Agentへのメッセージであればどういった命令かを抽出。
   const lines = message.trim().split("\n");
   const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
-  const tool = (tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
-  const args = (tool_and_arguments.length > 1 ? tool_and_arguments.slice(1) : []);
+  const desired_tool_name = (tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
+
+  const reply_tool = new replyTool();
+  const code_reply_tool = new codeReplyTool();
+  const calc_tool = new calcTool();
 
   // コマンドを判定する
-  if (tool == "/reply") {
+  if (desired_tool_name == reply_tool.name && reply_tool.checkInput(message)) {
     // 通常の返信ではコマンド行以外すべてのメッセージを返す。
-    const message_to_human = args.join(" ") + "\n" + lines.slice(1).join("\n");
-    postMessage(message_to_human, slackEvent.channel, ts);
+    reply_tool.use(message, slackEvent);
   }
-  else if (tool == "/code_reply" && args.length > 0 && lines.length > 1) {
-    const filename = args.length > 0 ? args[0] : null;
-    const code = lines.slice(1).join("\n");
-
-    // スニペットで返す
-    postSnippet(code, slackEvent.channel, ts, filename);
+  else if (desired_tool_name == code_reply_tool.name && code_reply_tool.checkInput(message)) {
+    code_reply_tool.use(message, slackEvent);
   }
-  else if (tool == "/calc" && args.length > 2) {
-    // X*Y等の四則演算を計算して、メッセージで返す。
-    const x = parseFloat(args[0]);
-    const operator = args[1];
-    const y = parseFloat(args[2]);
-    const answer = calc_simple(x, operator, y);
-    postMessage(answer, slackEvent.channel, ts);
+  else if (desired_tool_name == calc_tool.name && calc_tool.checkInput(message)) {
+    calc_tool.use(message, slackEvent);
   }
   else {
     // 未定義処理（現状は警告を出してメッセージ全体を返す）
@@ -139,22 +133,7 @@ function handleAiResponse(message, slackEvent) {
   }
 }
 
-function calc_simple(x, operator, y) {
-  let answer = null;
-  if (operator == "+") {
-    answer = x + y;
-  }
-  else if (operator == "-") {
-    answer = x - y;
-  }
-  else if (operator == "*") {
-    answer = x * y;
-  }
-  else if (operator == "/" && y != 0) {
-    answer = x / y;
-  }
-  return answer;
-}
+
 
 function postMessage(message, channel, event_ts) {
   // Slack APIのトークンを取得する
@@ -338,5 +317,107 @@ function postSnippet(content, channel, event_ts, filename = "sample.txt", initia
     UrlFetchApp.fetch(SLACK_API_ENDPOINT, options);
   } catch (e) {
     console.error(e); // エラーが発生した場合は、コンソールにエラーを出力する
+  }
+}
+
+class BaseTool {
+  constructor(name, description) {
+    this.name = name;
+    this.description = description;
+  }
+  extractMessage(message) {
+    const lines = message.trim().split("\n");
+    const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
+    const tool = (tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
+    const args = (tool_and_arguments.length > 1 ? tool_and_arguments.slice(1) : []);
+    return { lines: lines, tool: tool, args: args }
+  }
+  checkInput(message) {
+    console.warn("未実装");
+    return false;
+  }
+  getResult(message) {
+    console.warn("未実装")
+    return "ツールが未実装です。";
+  }
+}
+
+class replyTool extends BaseTool {
+  constructor() {
+    super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。');
+  }
+  checkInput(message) {
+    return true;
+  }
+  use(message, slackEvent) {
+    const ts = slackEvent.thread_ts || slackEvent.ts;
+    const inputs = this.extractMessage(message);
+    const message_to_human = args.join(" ") + "\n" + inputs.slice(1).join("\n");
+    postMessage(message_to_human, slackEvent.channel, ts);
+  }
+}
+
+class codeReplyTool extends BaseTool {
+  constructor() {
+    super("/code_reply", `"/code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEには言語に応じた適切な拡張子をつけて渡す必要がある。`)
+  }
+  checkInput(message) {
+    const inputs = this.extractMessage(message);
+    if (inputs.args.length > 0 && inputs.lines.length > 1) {
+      return true;
+    }
+    else {
+      return false;
+    }
+  }
+  use(message, slackEvent) {
+    const ts = slackEvent.thread_ts || slackEvent.ts;
+    const inputs = this.extractMessage(message);
+    const filename = inputs.args.length > 0 ? inputs.args[0] : null;
+    const code = inputs.lines.slice(1).join("\n");
+
+    // スニペットで返す
+    postSnippet(code, slackEvent.channel, ts, filename);
+  }
+}
+
+class calcTool extends BaseTool {
+  // X*Y等の四則演算を計算して、メッセージで返すツール。
+  constructor() {
+    super("/calc", `"/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には何も書いてはいけない。`)
+  }
+  checkInput(message) {
+    const inputs = this.extractMessage(message);
+    if (inputs.args.length > 2) {
+      return true;
+    }
+    else {
+      return false;
+    }
+  }
+  calcSimple(x, operator, y) {
+    let answer = null;
+    if (operator == "+") {
+      answer = x + y;
+    }
+    else if (operator == "-") {
+      answer = x - y;
+    }
+    else if (operator == "*") {
+      answer = x * y;
+    }
+    else if (operator == "/" && y != 0) {
+      answer = x / y;
+    }
+    return answer;
+  }
+  use(message, slackEvent) {
+    const ts = slackEvent.thread_ts || slackEvent.ts;
+    const inputs = this.extractMessage(message);
+    const x = parseFloat(inputs.args[0]);
+    const operator = inputs.args[1];
+    const y = parseFloat(inputs.args[2]);
+    const answer = this.calcSimple(x, operator, y);
+    postMessage(x+operator+y+"="+answer, slackEvent.channel, ts);
   }
 }
