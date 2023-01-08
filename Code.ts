@@ -9,23 +9,30 @@
 
 import { calcTool } from "./calctool"
 import { codeReplyTool } from "./codereplytool"
+import { PostDataContents } from "./postDataContents";
+import { PostEvent } from "./postevent";
+import { postSlackMessage } from "./postSlackMessage";
+import { postSlackSnippet } from "./postSlackSnippet";
 import { replyTool } from "./replytool"
+import { SlackEvent } from "./slackevent";
 
-function doPost(e) {
+
+
+function doPost(e:PostEvent) {
   // Slackからのイベントを取得する
-  const slackEvent = JSON.parse(e.postData.contents);
+  const postDataContents = JSON.parse(e.postData.contents);
 
   // Slackからのイベントの種類を判定する
-  if (slackEvent.type == "url_verification") {
+  if (postDataContents.type == "url_verification") {
     // URLの検証イベントの場合は、challengeパラメータを返す
-    return ContentService.createTextOutput(slackEvent.challenge).setMimeType(ContentService.MimeType.PLAIN_TEXT);
-  } else if (slackEvent.type == "event_callback") {
+    return ContentService.createTextOutput(postDataContents.challenge).setMimeType(ContentService.MimeType.TEXT);
+  } else if (postDataContents.type == "event_callback") {
     // イベントコールバックイベントの場合は、イベントを処理する
-    return handleEvent(slackEvent);
+    return handleEvent(postDataContents);
   }
 }
 
-function isDuplicateSlackEvent(slackEvent) {
+function isDuplicateSlackEvent(slackEvent: SlackEvent) {
   const channel = slackEvent.channel;
   const ts = slackEvent.ts; //メッセージのtsを使う（event_tsはスレッドの親メッセージのts）
   const cache = CacheService.getScriptCache();
@@ -36,14 +43,14 @@ function isDuplicateSlackEvent(slackEvent) {
     return true
   }
   else {
-    cache.put(cacheKey, true, 60); // trueをcacheKeyでキャッシュする（単位sec）
+    cache.put(cacheKey, "true", 60); // trueをcacheKeyでキャッシュする（単位sec）
   }
   return false
 }
 
-function handleEvent(event) {
+function handleEvent(postDataContents:PostDataContents) {
   // Slackから送信されたイベントを取得する
-  const slackEvent = event.event;
+  const slackEvent = postDataContents.event;
   const ts = slackEvent.thread_ts || slackEvent.ts;
 
   if (isDuplicateSlackEvent(slackEvent)) {
@@ -66,41 +73,41 @@ function handleEvent(event) {
     // コマンドを判定する
     if (command == "/usage") {
       const usage = fetchUsageFromDec();
-      postMessage("これまでの使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel, ts);
+      postSlackMessage("これまでの使用量は$" + usage.current_usage_usd + "です。", slackEvent.channel, ts);
     }
     else if (command == "/clear") {
       const cacheKey = slackEvent.channel;
       const cache = CacheService.getScriptCache();
       cache.remove(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
-      postMessage("記憶喪失しました。。", slackEvent.channel, ts);
+      postSlackMessage("記憶喪失しました。。", slackEvent.channel, ts);
     }
     else if (command == "/store") {
-      const messages = getAndPushMessages(slackEvent.channel, null);
+      const messages = getAndAddMessages(slackEvent.channel);
       const prompt = makePrompt(messages, "");
-      postSnippet(prompt, slackEvent.channel, ts);
+      postSlackSnippet(prompt, slackEvent.channel, ts);
     }
     else if (array.length > 1) {
       const message = array.slice(1).join(" "); // 特殊命令でない場合は文字列すべてをGPT3に投げる
 
       // promptを作成（同じチャンネルでの会話は10分以内なら覚えている）
       const cacheKey = slackEvent.channel;
-      const messages = getAndPushMessages(cacheKey, "Human:" + message);
+      const messages = getAndAddMessages(cacheKey, "Human:" + message);
 
       const prompt = makePrompt(messages);
       const ai_message = fetchGpt3Message(prompt);
 
-      getAndPushMessages(cacheKey, "AI:" + ai_message);
+      getAndAddMessages(cacheKey, "AI:" + ai_message);
       handleAiResponse(ai_message, slackEvent);
       //sendMessage(ai_message, slackEvent.channel, ts);
     }
     else {
-      postMessage("すみません、よくわからないです。。", slackEvent.channel);
+      postSlackMessage("すみません、よくわからないです。。", slackEvent.channel, ts);
     }
 
   }
 }
 
-function handleAiResponse(message:string, slackEvent) {
+function handleAiResponse(message:string, slackEvent:SlackEvent) {
   // AIの返信の種類と含まれる命令を判定する
   // AIのメッセージの一行目には/agent XX YYのようなエージェントへの命令か、/humanという人間への返信かを区別する情報を含む。
   // これを処理して適切なアウトプットにつなげる。
@@ -110,7 +117,7 @@ function handleAiResponse(message:string, slackEvent) {
   // AIのメッセージの一行目から、人間への返信orAgentへのメッセージ、Agentへのメッセージであればどういった命令かを抽出。
   const lines = message.trim().split("\n");
   const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
-  const desired_tool_name = (tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
+  const desired_tool_name = (tool_and_arguments && tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
 
   const reply_tool = new replyTool();
   const code_reply_tool = new codeReplyTool();
@@ -132,7 +139,7 @@ function handleAiResponse(message:string, slackEvent) {
     console.warn("未定義の命令が設定されました。");
     console.warn("tool_and_arguments:", tool_and_arguments);
     console.warn("message:", lines);
-    postMessage(message + "\n(AIからの未定義命令検知)", slackEvent.channel, ts);
+    postSlackMessage(message + "\n(AIからの未定義命令検知)", slackEvent.channel, ts);
   }
 }
 
@@ -141,7 +148,7 @@ function handleAiResponse(message:string, slackEvent) {
  * @param {string} message - 送信するメッセージ
  * @return {string} GPT-3からのレスポンス
  */
-function fetchGpt3Message(prompt) {
+function fetchGpt3Message(prompt:string) {
   // GPT-3のエンドポイントURL
   const uri = 'https://api.openai.com/v1/completions';
   // OpenAIのAPIキー
@@ -168,11 +175,11 @@ function fetchGpt3Message(prompt) {
     stop: ["\nAI:", "\nHuman:", "\nTool:"] // AIが一人で会話を続けないようにします。
   };
   // HTTPリクエストで使用するオプション
-  const options = {
-    'muteHttpExceptions': true, // HTTPエラーを無視する
-    'headers': headers, // ヘッダーを指定する
-    'method': 'POST', // HTTPメソッドを指定する
-    'payload': JSON.stringify(requestBody),// リクエストボディを指定する
+  const options:GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    muteHttpExceptions: true, // HTTPエラーを無視する
+    headers: headers, // ヘッダーを指定する
+    method: "post", // HTTPメソッドを指定する
+    payload: JSON.stringify(requestBody),// リクエストボディを指定する
   };
   try {
     // GPT-3にリクエストを送信する
@@ -209,10 +216,10 @@ function fetchUsageFromDec() {
   const endpoint = "https://api.openai.com/v1/usage?start_date=" + startDate + "&end_date=" + endDate;
 
   // HTTP リクエストを作成
-  const options = {
-    "method": "GET",
-    "headers": {
-      "Authorization": "Bearer " + apiKey
+  const options:GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + apiKey
     }
   };
 
@@ -248,7 +255,7 @@ function makePrompt(messages:string[], aiPrefix = "AI:") {
   return prompt
 }
 
-function getAndPushMessages(cacheKey:string, newMessage:string) {
+function getAndAddMessages(cacheKey:string, newMessage?:string) {
   const cache = CacheService.getScriptCache();
   const prevMessagesString = cache.get(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
   // キャッシュには文字列で入っているため、パースして、配列として取得する。

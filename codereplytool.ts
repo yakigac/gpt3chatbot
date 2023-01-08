@@ -1,5 +1,6 @@
 import {BaseTool} from "./basetool"
-import { postSnippet } from "./postsnippet";
+import { postSlackSnippet } from "./postSlackSnippet";
+import { SlackEvent } from "./slackevent";
 import { ToolInterface } from "./toolinterface";
 
 export class codeReplyTool extends BaseTool implements ToolInterface{
@@ -15,14 +16,14 @@ export class codeReplyTool extends BaseTool implements ToolInterface{
             return false;
         }
     }
-    use(message:string, slackEvent) {
+    use(message:string, slackEvent:SlackEvent) {
         const ts = slackEvent.thread_ts || slackEvent.ts;
         const inputs = this.extractMessage(message);
         const filename = inputs.args[0];
         const code = inputs.lines.slice(1).join("\n");
 
         // スニペットで返す
-        postSnippet(code, slackEvent.channel, ts, filename);
+        postSlackSnippet(code, slackEvent.channel, ts, filename);
         return code;
     }
 }

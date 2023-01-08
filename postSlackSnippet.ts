@@ -1,4 +1,4 @@
-export function postSnippet(content:string, channel:string, event_ts:string, filename = "sample.txt", initial_comment?:string|null) {
+export function postSlackSnippet(content:string, channel:string, event_ts:string, filename = "sample.txt", initial_comment?:string|null) {
     // Slack APIトークンをスクリプトプロパティから取得する
     const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
     // Slack APIのfiles.uploadエンドポイント
@@ -16,7 +16,7 @@ export function postSnippet(content:string, channel:string, event_ts:string, fil
     };
   
     // Slack APIへのリクエストで使用するオプションを設定する
-    var options = {
+    var options:GoogleAppsScript.URL_Fetch.URLFetchRequestOptions  = {
       "method": "post", // HTTPのPOSTメソッドを使用する
       "headers": {
         "Authorization": "Bearer " + token // Slack APIトークンを使用する

@@ -1,6 +1,7 @@
 import { ToolInterface } from "./toolinterface";
 import {BaseTool} from "./basetool"
-import { postMessage } from "./postmessage";
+import { postSlackMessage } from "./postSlackMessage";
+import { SlackEvent } from "./slackevent";
 
 export class calcTool extends BaseTool implements ToolInterface {
     // X*Y等の四則演算を計算して、メッセージで返すツール。
@@ -16,14 +17,14 @@ export class calcTool extends BaseTool implements ToolInterface {
             return false;
         }
     }
-    use(message:string, slackEvent) {
+    use(message:string, slackEvent:SlackEvent) {
         const ts = slackEvent.thread_ts || slackEvent.ts;
         const inputs = this.extractMessage(message);
         const x = parseFloat(inputs.args[0]);
         const operator = inputs.args[1];
         const y = parseFloat(inputs.args[2]);
         const answer = this.calcSimple(x, operator, y);
-        postMessage(x + operator + y + "=" + answer, slackEvent.channel, ts);
+        postSlackMessage(x + operator + y + "=" + answer, slackEvent.channel, ts);
         return x + operator + y + "=" + answer;
     }
     private calcSimple(x:number, operator:string, y:number) {
