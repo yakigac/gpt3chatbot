@@ -9,10 +9,10 @@
 
 import { calcTool } from "./calctool"
 import { codeReplyTool } from "./codereplytool"
-import { PostDataContents } from "./postDataContents";
+import { PostDataContents } from "./postdatacontents";
 import { PostEvent } from "./postevent";
-import { postSlackMessage } from "./postSlackMessage";
-import { postSlackSnippet } from "./postSlackSnippet";
+import { postSlackMessage } from "./postslackmessage";
+import { postSlackSnippet } from "./postslacksnippet";
 import { replyTool } from "./replytool"
 import { SlackEvent } from "./slackevent";
 

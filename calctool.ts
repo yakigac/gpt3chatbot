@@ -1,6 +1,6 @@
 import { ToolInterface } from "./toolinterface";
 import {BaseTool} from "./basetool"
-import { postSlackMessage } from "./postSlackMessage";
+import { postSlackMessage } from "./postslackmessage";
 import { SlackEvent } from "./slackevent";
 
 export class calcTool extends BaseTool implements ToolInterface {

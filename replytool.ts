@@ -1,7 +1,7 @@
 import {BaseTool} from "./basetool"
 import { ToolInterface } from "./toolinterface";
 import { SlackEvent } from "./slackevent";
-import { postSlackMessage } from "./postSlackMessage";
+import { postSlackMessage } from "./postslackmessage";
 export class replyTool extends BaseTool implements ToolInterface {
     constructor() {
         super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。');

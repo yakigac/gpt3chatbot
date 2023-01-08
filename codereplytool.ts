@@ -1,5 +1,5 @@
 import {BaseTool} from "./basetool"
-import { postSlackSnippet } from "./postSlackSnippet";
+import { postSlackSnippet } from "./postslacksnippet";
 import { SlackEvent } from "./slackevent";
 import { ToolInterface } from "./toolinterface";
 
