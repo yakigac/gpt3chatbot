@@ -7,6 +7,9 @@
   - https://github.com/hwchase17/langchain/blob/master/LICENSE
 */
 
+import { calcTool } from "./calctool"
+import { codeReplyTool } from "./codereplytool"
+import { replyTool } from "./replytool"
 
 function doPost(e) {
   // Slackからのイベントを取得する
@@ -97,7 +100,7 @@ function handleEvent(event) {
   }
 }
 
-function handleAiResponse(message, slackEvent) {
+function handleAiResponse(message:string, slackEvent) {
   // AIの返信の種類と含まれる命令を判定する
   // AIのメッセージの一行目には/agent XX YYのようなエージェントへの命令か、/humanという人間への返信かを区別する情報を含む。
   // これを処理して適切なアウトプットにつなげる。
@@ -131,27 +134,6 @@ function handleAiResponse(message, slackEvent) {
     console.warn("message:", lines);
     postMessage(message + "\n(AIからの未定義命令検知)", slackEvent.channel, ts);
   }
-}
-
-
-
-function postMessage(message, channel, event_ts) {
-  // Slack APIのトークンを取得する
-  const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
-
-  // Slack APIを使用して、メッセージを送信する
-  const options = {
-    "method": "post",
-    "headers": {
-      "Authorization": "Bearer " + token
-    },
-    "payload": {
-      "channel": channel,
-      "text": message,
-      "thread_ts": event_ts
-    }
-  };
-  UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", options);
 }
 
 /**
@@ -247,7 +229,7 @@ function fetchUsageFromDec() {
   return usage
 }
 
-function makePrompt(messages, aiPrefix = "AI:") {
+function makePrompt(messages:string[], aiPrefix = "AI:") {
   const prompt = `以下はHumanと、AIの対話です。AIは賢くHumanに従順で、簡潔に受け答えし、必要なtoolを利用して返答します。AIは以下ルールを守ります。\n`
     + `- 返答の1行目は必ず/xxx args1 args2 ...等という形で、メッセージの種別と必要な引数を記載する。(xxxにはツール名、argsには必要な引数が入る)\n`
     + `- toolが使える場合は、できる限り積極的にtoolを活用する。\n`
@@ -266,14 +248,11 @@ function makePrompt(messages, aiPrefix = "AI:") {
   return prompt
 }
 
-function getAndPushMessages(cacheKey, newMessage) {
+function getAndPushMessages(cacheKey:string, newMessage:string) {
   const cache = CacheService.getScriptCache();
   const prevMessagesString = cache.get(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
   // キャッシュには文字列で入っているため、パースして、配列として取得する。
-  let messages = JSON.parse(prevMessagesString);
-  if (messages == null) {
-    messages = [];
-  }
+  const messages = prevMessagesString ? JSON.parse(prevMessagesString) : [];
   if (newMessage != null) {
     messages.push(newMessage)
   }
@@ -283,141 +262,4 @@ function getAndPushMessages(cacheKey, newMessage) {
   cache.put(cacheKey, messagesString, 600);
 
   return messages
-}
-
-function postSnippet(content, channel, event_ts, filename = "sample.txt", initial_comment) {
-  // Slack APIトークンをスクリプトプロパティから取得する
-  const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
-  // Slack APIのfiles.uploadエンドポイント
-  const SLACK_API_ENDPOINT = "https://slack.com/api/files.upload";
-
-  // Slack APIのfiles.uploadエンドポイントを使用して、投稿するテキストファイルのコンテンツを設定する
-  var payload = {
-    "token": token, // Slack APIトークン
-    "channels": channel, // 投稿先のチャンネルID
-    'content': content, // メッセージの中身
-    'initial_comment': initial_comment,
-    'filename': filename, // テキスト形式のファイルを指定
-    'title': filename, // Slack上でのファイルのタイトル
-    "thread_ts": event_ts
-  };
-
-  // Slack APIへのリクエストで使用するオプションを設定する
-  var options = {
-    "method": "post", // HTTPのPOSTメソッドを使用する
-    "headers": {
-      "Authorization": "Bearer " + token // Slack APIトークンを使用する
-    },
-    'contentType': 'application/x-www-form-urlencoded', // コンテンツタイプを指定する
-    "payload": payload // リクエストペイロードを設定する
-  };
-
-  try {
-    // Postリクエストを送信する
-    UrlFetchApp.fetch(SLACK_API_ENDPOINT, options);
-  } catch (e) {
-    console.error(e); // エラーが発生した場合は、コンソールにエラーを出力する
-  }
-}
-
-class BaseTool {
-  constructor(name, description) {
-    this.name = name;
-    this.description = description;
-  }
-  extractMessage(message) {
-    const lines = message.trim().split("\n");
-    const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
-    const tool = (tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
-    const args = (tool_and_arguments.length > 1 ? tool_and_arguments.slice(1) : []);
-    return { lines: lines, tool: tool, args: args }
-  }
-  checkInput(message) {
-    console.warn("未実装");
-    return false;
-  }
-  getResult(message) {
-    console.warn("未実装")
-    return "ツールが未実装です。";
-  }
-}
-
-class replyTool extends BaseTool {
-  constructor() {
-    super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。');
-  }
-  checkInput(message) {
-    return true;
-  }
-  use(message, slackEvent) {
-    const ts = slackEvent.thread_ts || slackEvent.ts;
-    const inputs = this.extractMessage(message);
-    const message_to_human = args.join(" ") + "\n" + inputs.slice(1).join("\n");
-    postMessage(message_to_human, slackEvent.channel, ts);
-  }
-}
-
-class codeReplyTool extends BaseTool {
-  constructor() {
-    super("/code_reply", `"/code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEには言語に応じた適切な拡張子をつけて渡す必要がある。`)
-  }
-  checkInput(message) {
-    const inputs = this.extractMessage(message);
-    if (inputs.args.length > 0 && inputs.lines.length > 1) {
-      return true;
-    }
-    else {
-      return false;
-    }
-  }
-  use(message, slackEvent) {
-    const ts = slackEvent.thread_ts || slackEvent.ts;
-    const inputs = this.extractMessage(message);
-    const filename = inputs.args.length > 0 ? inputs.args[0] : null;
-    const code = inputs.lines.slice(1).join("\n");
-
-    // スニペットで返す
-    postSnippet(code, slackEvent.channel, ts, filename);
-  }
-}
-
-class calcTool extends BaseTool {
-  // X*Y等の四則演算を計算して、メッセージで返すツール。
-  constructor() {
-    super("/calc", `"/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には何も書いてはいけない。`)
-  }
-  checkInput(message) {
-    const inputs = this.extractMessage(message);
-    if (inputs.args.length > 2) {
-      return true;
-    }
-    else {
-      return false;
-    }
-  }
-  calcSimple(x, operator, y) {
-    let answer = null;
-    if (operator == "+") {
-      answer = x + y;
-    }
-    else if (operator == "-") {
-      answer = x - y;
-    }
-    else if (operator == "*") {
-      answer = x * y;
-    }
-    else if (operator == "/" && y != 0) {
-      answer = x / y;
-    }
-    return answer;
-  }
-  use(message, slackEvent) {
-    const ts = slackEvent.thread_ts || slackEvent.ts;
-    const inputs = this.extractMessage(message);
-    const x = parseFloat(inputs.args[0]);
-    const operator = inputs.args[1];
-    const y = parseFloat(inputs.args[2]);
-    const answer = this.calcSimple(x, operator, y);
-    postMessage(x+operator+y+"="+answer, slackEvent.channel, ts);
-  }
 }
