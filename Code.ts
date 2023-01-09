@@ -61,7 +61,7 @@ class BaseTool {
 
 class replyTool extends BaseTool implements ToolInterface {
   constructor() {
-    super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。');
+    super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。他のツールが使える場合はそちらを優先して使う。');
   }
   checkInput(message: string) {
     return true;
@@ -78,7 +78,7 @@ class replyTool extends BaseTool implements ToolInterface {
 class calcTool extends BaseTool implements ToolInterface {
   // X*Y等の四則演算を計算して、メッセージで返すツール。
   constructor() {
-    super("/calc", `"/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には何も書いてはいけない。`)
+    super("/calc", `"/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には絶対に何も書いてはいけない。`)
   }
   checkInput(message: string) {
     const inputs = this.extractMessage(message);
@@ -157,8 +157,7 @@ function postSlackMessage(message: string, channel: string, event_ts: string) {
     "payload": {
       "channel": channel,
       "text": message,
-      "thread_ts": event_ts,
-      "username": "bot"
+      "thread_ts": event_ts
     }
   };
   UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", options);
@@ -253,6 +252,12 @@ function handleEvent(postDataContents: PostDataContents) {
 
     console.log("slackEvent", slackEvent);
 
+    const reply_tool = new replyTool();
+    const code_reply_tool = new codeReplyTool();
+    const calc_tool = new calcTool();
+
+    const tools = [reply_tool, code_reply_tool, calc_tool];
+
     // コマンドを判定する
     if (command == "/usage") {
       const usage = fetchUsageFromDec();
@@ -266,7 +271,7 @@ function handleEvent(postDataContents: PostDataContents) {
     }
     else if (command == "/store") {
       const messages = getAndAddMessages(slackEvent.channel);
-      const prompt = makePrompt(messages, "");
+      const prompt = makePrompt(messages, tools);
       postSlackSnippet(prompt, slackEvent.channel, ts);
     }
     else if (array.length > 1) {
@@ -276,7 +281,7 @@ function handleEvent(postDataContents: PostDataContents) {
       const cacheKey = slackEvent.channel;
       const messages = getAndAddMessages(cacheKey, "Human:" + message);
 
-      const prompt = makePrompt(messages);
+      const prompt = makePrompt(messages, tools);
       const ai_message = fetchGpt3Message(prompt);
 
       getAndAddMessages(cacheKey, "AI:" + ai_message);
@@ -301,6 +306,8 @@ function handleAiResponse(message: string, slackEvent: SlackEvent) {
   const lines = message.trim().split("\n");
   const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
   const desired_tool_name = (tool_and_arguments && tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
+
+  console.log(message);
 
   const reply_tool = new replyTool();
   const code_reply_tool = new codeReplyTool();
@@ -355,7 +362,7 @@ function fetchGpt3Message(prompt: string) {
     // 0.5と指定すると生成される文章は入力となる文章に似たものが多くなる傾向があります。
     // 逆に、temperatureフィールドに1.0と指定すると、生成される文章は、より多様なものになる傾向があります。
     temperature: 0.1,
-    stop: ["\nAI:", "\nHuman:", "\nTool:"] // AIが一人で会話を続けないようにします。
+    stop: ["\nAI:","\nHuman:"] // AIが一人で会話を続けないようにします。
   };
   // HTTPリクエストで使用するオプション
   const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
@@ -419,20 +426,18 @@ function fetchUsageFromDec() {
   return usage
 }
 
-function makePrompt(messages: string[], aiPrefix = "AI:") {
-  const prompt = `以下はHumanと、AIの対話です。AIは賢くHumanに従順で、簡潔に受け答えし、必要なtoolを利用して返答します。AIは以下ルールを守ります。\n`
-    + `- 返答の1行目は必ず/xxx args1 args2 ...等という形で、メッセージの種別と必要な引数を記載する。(xxxにはツール名、argsには必要な引数が入る)\n`
-    + `- toolが使える場合は、できる限り積極的にtoolを活用する。\n`
-    + `- プログラムコードを記載する場合、その説明はプログラム内のコメントとして記載する(2行目以降をそのまま実行できるようにする)。\n`
+function makePrompt(messages: string[], tools: BaseTool[], aiPrefix = "AI:") {
+  const prompt = `以下はHumanと、AIのやり取りです。AIは賢くHumanに従順で、必要なtoolを利用して返答します。AIは以下ルールを守ります。\n`
+    + `- 返答の1行目は必ず/xxx args1 args2 ...等という形で、ツールの種別と必要な引数を記載する。(xxxにはツール名、argsには必要な引数が入る)\n`
+    + `- プログラムコードを記載する場合、説明はプログラム内のコメントとして記載する(二行目以降の返答内容をそのまま実行できるようにする)。\n`
     + `- 回答はプログラムコード部分を除いて、原則140文字以内に収める。この制限を超える場合はHumanに許可を求める。\n`
     + `---\n`
     + `toolには、以下の種類が存在します。\n`
-    + `- "/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。\n`
-    + `- "/code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEには言語に応じた適切な拡張子をつけて渡す必要がある。\n`
-    + `- "/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には何も書いてはいけない。\n`
-    + `---\n`
-    + messages.join('\n')
+    + tools.map(obj => "- " + obj.name + ": " + obj.description).join("\n")
     + `\n`
+    + `---\n`
+    + `\n`
+    + messages.join('\n')
     + aiPrefix;
 
   return prompt
