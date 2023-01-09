@@ -43,6 +43,7 @@ type PostEvent = {
 
 // tools
 class BaseTool {
+  // Toolの基底クラス。これをextendsしてツール作成する。
   name: string;
   description: string;
 
@@ -51,11 +52,20 @@ class BaseTool {
     this.description = description;
   }
   extractMessage(message: string) {
+    // 与えられたメッセージを分解し、ツール名と引数、それ以外の入力を返す。
+    // (messageの例)
+    // TOOLNAME ARG1 ARG2
+    // OTHERTEXT
     const lines = message.trim().split("\n");
     const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
     const tool = (tool_and_arguments && tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
     const args = (tool_and_arguments && tool_and_arguments.length > 1 ? tool_and_arguments.slice(1) : []);
     return { lines: lines, tool: tool, args: args }
+  }
+  checkInput(message: string) {
+    // ツール名が入力されたツール名と一致する場合trueを返す。
+    const inputs = this.extractMessage(message);
+    return this.name == inputs.tool;
   }
 }
 
@@ -64,7 +74,7 @@ class replyTool extends BaseTool implements ToolInterface {
     super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。他のツールが使える場合はそちらを優先して使う。');
   }
   checkInput(message: string) {
-    return true;
+    return super.checkInput(message);
   }
   use(message: string, slackEvent: SlackEvent) {
     const ts = slackEvent.thread_ts || slackEvent.ts;
@@ -81,8 +91,11 @@ class calcTool extends BaseTool implements ToolInterface {
     super("/calc", `"/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には絶対に何も書いてはいけない。`)
   }
   checkInput(message: string) {
+    if (!super.checkInput(message)) {
+      return false;
+    }
     const inputs = this.extractMessage(message);
-    if (inputs.args.length > 2) {
+    if (inputs.args.length == 3) {
       return true;
     }
     else {
@@ -122,6 +135,9 @@ class codeReplyTool extends BaseTool implements ToolInterface {
     super("/code_reply", `"/code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEには言語に応じた適切な拡張子をつけて渡す必要がある。`)
   }
   checkInput(message: string) {
+    if (!super.checkInput(message)) {
+      return false;
+    }
     const inputs = this.extractMessage(message);
     if (inputs.args.length > 0 && inputs.lines.length > 1) {
       return true;
@@ -251,12 +267,7 @@ function handleEvent(postDataContents: PostDataContents) {
     const command = (array.length > 1 ? array[1] : null)
 
     console.log("slackEvent", slackEvent);
-
-    const reply_tool = new replyTool();
-    const code_reply_tool = new codeReplyTool();
-    const calc_tool = new calcTool();
-
-    const tools = [reply_tool, code_reply_tool, calc_tool];
+    const tools = [new replyTool(), new codeReplyTool(), new calcTool()];
 
     // コマンドを判定する
     if (command == "/usage") {
@@ -285,7 +296,7 @@ function handleEvent(postDataContents: PostDataContents) {
       const ai_message = fetchGpt3Message(prompt);
 
       getAndAddMessages(cacheKey, "AI:" + ai_message);
-      handleAiResponse(ai_message, slackEvent);
+      handleAiResponse(tools, ai_message, slackEvent);
       //sendMessage(ai_message, slackEvent.channel, ts);
     }
     else {
@@ -295,40 +306,22 @@ function handleEvent(postDataContents: PostDataContents) {
   }
 }
 
-function handleAiResponse(message: string, slackEvent: SlackEvent) {
+function handleAiResponse(tools:ToolInterface[], message: string, slackEvent: SlackEvent) {
   // AIの返信の種類と含まれる命令を判定する
   // AIのメッセージの一行目には/agent XX YYのようなエージェントへの命令か、/humanという人間への返信かを区別する情報を含む。
   // これを処理して適切なアウトプットにつなげる。
 
   const ts = slackEvent.thread_ts || slackEvent.ts;
 
-  // AIのメッセージの一行目から、人間への返信orAgentへのメッセージ、Agentへのメッセージであればどういった命令かを抽出。
-  const lines = message.trim().split("\n");
-  const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
-  const desired_tool_name = (tool_and_arguments && tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
-
-  console.log(message);
-
-  const reply_tool = new replyTool();
-  const code_reply_tool = new codeReplyTool();
-  const calc_tool = new calcTool();
-
   // コマンドを判定する
-  if (desired_tool_name == reply_tool.name && reply_tool.checkInput(message)) {
-    // 通常の返信ではコマンド行以外すべてのメッセージを返す。
-    reply_tool.use(message, slackEvent);
+  const selectedTool = tools.find(tool => tool.checkInput(message));
+  if (selectedTool) {
+    selectedTool.use(message, slackEvent);
   }
-  else if (desired_tool_name == code_reply_tool.name && code_reply_tool.checkInput(message)) {
-    code_reply_tool.use(message, slackEvent);
-  }
-  else if (desired_tool_name == calc_tool.name && calc_tool.checkInput(message)) {
-    calc_tool.use(message, slackEvent);
-  }
-  else {
+  else{
     // 未定義処理（現状は警告を出してメッセージ全体を返す）
     console.warn("未定義の命令が設定されました。");
-    console.warn("tool_and_arguments:", tool_and_arguments);
-    console.warn("message:", lines);
+    console.warn("message:", message);
     postSlackMessage(message + "\n(AIからの未定義命令検知)", slackEvent.channel, ts);
   }
 }
@@ -362,7 +355,7 @@ function fetchGpt3Message(prompt: string) {
     // 0.5と指定すると生成される文章は入力となる文章に似たものが多くなる傾向があります。
     // 逆に、temperatureフィールドに1.0と指定すると、生成される文章は、より多様なものになる傾向があります。
     temperature: 0.1,
-    stop: ["\nAI:","\nHuman:"] // AIが一人で会話を続けないようにします。
+    stop: ["\nAI:", "\nHuman:"] // AIが一人で会話を続けないようにします。
   };
   // HTTPリクエストで使用するオプション
   const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
@@ -426,7 +419,7 @@ function fetchUsageFromDec() {
   return usage
 }
 
-function makePrompt(messages: string[], tools: BaseTool[], aiPrefix = "AI:") {
+function makePrompt(messages: string[], tools: ToolInterface[], aiPrefix = "AI:") {
   const prompt = `以下はHumanと、AIのやり取りです。AIは賢くHumanに従順で、必要なtoolを利用して返答します。AIは以下ルールを守ります。\n`
     + `- 返答の1行目は必ず/xxx args1 args2 ...等という形で、ツールの種別と必要な引数を記載する。(xxxにはツール名、argsには必要な引数が入る)\n`
     + `- プログラムコードを記載する場合、説明はプログラム内のコメントとして記載する(二行目以降の返答内容をそのまま実行できるようにする)。\n`
