@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "typescript": "^4.9.4"
+  },
+  "devDependencies": {
+    "@slack/types": "^2.8.0",
+    "@types/google-apps-script": "^1.0.56"
+  }
+}
