@@ -7,18 +7,201 @@
   - https://github.com/hwchase17/langchain/blob/master/LICENSE
 */
 
-import { calcTool } from "./calctool"
-import { codeReplyTool } from "./codereplytool"
-import { PostDataContents } from "./postdatacontents";
-import { PostEvent } from "./postevent";
-import { postSlackMessage } from "./postslackmessage";
-import { postSlackSnippet } from "./postslacksnippet";
-import { replyTool } from "./replytool"
-import { SlackEvent } from "./slackevent";
+// type, interface
 
+interface ToolInterface {
+  name: string;
+  description: string;
+  checkInput(message: string): boolean;
+  use(message: string, slackEvent: any): string;
+}
 
+type SlackEvent = {
+  type: string;
+  text: string;
+  channel: string;
+  ts: string;
+  thread_ts?: string;
+}
 
-function doPost(e:PostEvent) {
+type PostDataContents = {
+  event: SlackEvent
+}
+
+type PostEvent = {
+  queryString: string;
+  parameter: { [index: string]: string; };
+  parameters: { [index: string]: [string]; };
+  contentLenth: number;
+  postData: {
+    length: number;
+    type: string;
+    contents: string;
+    name: string;
+  };
+}
+
+// tools
+class BaseTool {
+  name: string;
+  description: string;
+
+  constructor(name: string, description: string) {
+    this.name = name;
+    this.description = description;
+  }
+  extractMessage(message: string) {
+    const lines = message.trim().split("\n");
+    const tool_and_arguments = (lines.length > 0 ? lines[0].trim().split(" ") : null);
+    const tool = (tool_and_arguments && tool_and_arguments.length > 0 ? tool_and_arguments[0] : null);
+    const args = (tool_and_arguments && tool_and_arguments.length > 1 ? tool_and_arguments.slice(1) : []);
+    return { lines: lines, tool: tool, args: args }
+  }
+}
+
+class replyTool extends BaseTool implements ToolInterface {
+  constructor() {
+    super("/reply", '"/reply"のようなインプットがあった場合、二行目以降のメッセージを人間に送る。');
+  }
+  checkInput(message: string) {
+    return true;
+  }
+  use(message: string, slackEvent: SlackEvent) {
+    const ts = slackEvent.thread_ts || slackEvent.ts;
+    const inputs = this.extractMessage(message);
+    const message_to_human = inputs.args.join(" ") + "\n" + inputs.lines.slice(1).join("\n");
+    postSlackMessage(message_to_human, slackEvent.channel, ts);
+    return message_to_human;
+  }
+}
+
+class calcTool extends BaseTool implements ToolInterface {
+  // X*Y等の四則演算を計算して、メッセージで返すツール。
+  constructor() {
+    super("/calc", `"/calc X * Y"のようなインプットがあった場合、XとYを四則演算して返す。二行目以降には何も書いてはいけない。`)
+  }
+  checkInput(message: string) {
+    const inputs = this.extractMessage(message);
+    if (inputs.args.length > 2) {
+      return true;
+    }
+    else {
+      return false;
+    }
+  }
+  use(message: string, slackEvent: SlackEvent) {
+    const ts = slackEvent.thread_ts || slackEvent.ts;
+    const inputs = this.extractMessage(message);
+    const x = parseFloat(inputs.args[0]);
+    const operator = inputs.args[1];
+    const y = parseFloat(inputs.args[2]);
+    const answer = this.calcSimple(x, operator, y);
+    postSlackMessage(x + operator + y + "=" + answer, slackEvent.channel, ts);
+    return x + operator + y + "=" + answer;
+  }
+  private calcSimple(x: number, operator: string, y: number) {
+    let answer = null;
+    if (operator == "+") {
+      answer = x + y;
+    }
+    else if (operator == "-") {
+      answer = x - y;
+    }
+    else if (operator == "*") {
+      answer = x * y;
+    }
+    else if (operator == "/" && y != 0) {
+      answer = x / y;
+    }
+    return answer;
+  }
+}
+
+class codeReplyTool extends BaseTool implements ToolInterface {
+  constructor() {
+    super("/code_reply", `"/code_reply FILENAME"のようなインプットがあった場合、二行目以降に書かれたコードをシンタックスハイライトしてHumanに渡す。FILENAMEには言語に応じた適切な拡張子をつけて渡す必要がある。`)
+  }
+  checkInput(message: string) {
+    const inputs = this.extractMessage(message);
+    if (inputs.args.length > 0 && inputs.lines.length > 1) {
+      return true;
+    }
+    else {
+      return false;
+    }
+  }
+  use(message: string, slackEvent: SlackEvent) {
+    const ts = slackEvent.thread_ts || slackEvent.ts;
+    const inputs = this.extractMessage(message);
+    const filename = inputs.args[0];
+    const code = inputs.lines.slice(1).join("\n");
+
+    // スニペットで返す
+    postSlackSnippet(code, slackEvent.channel, ts, filename);
+    return code;
+  }
+}
+
+// functions
+
+function postSlackMessage(message: string, channel: string, event_ts: string) {
+  // Slack APIのトークンを取得する
+  const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
+
+  // Slack APIを使用して、メッセージを送信する
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    "method": "post",
+    "headers": {
+      "Authorization": "Bearer " + token
+    },
+    "payload": {
+      "channel": channel,
+      "text": message,
+      "thread_ts": event_ts,
+      "username": "bot"
+    }
+  };
+  UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", options);
+}
+
+function postSlackSnippet(content: string, channel: string, event_ts: string, filename = "sample.txt", initial_comment?: string | null) {
+  // Slack APIトークンをスクリプトプロパティから取得する
+  const token = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
+  // Slack APIのfiles.uploadエンドポイント
+  const SLACK_API_ENDPOINT = "https://slack.com/api/files.upload";
+
+  // Slack APIのfiles.uploadエンドポイントを使用して、投稿するテキストファイルのコンテンツを設定する
+  var payload = {
+    "token": token, // Slack APIトークン
+    "channels": channel, // 投稿先のチャンネルID
+    'content': content, // メッセージの中身
+    'initial_comment': initial_comment,
+    'filename': filename, // テキスト形式のファイルを指定
+    'title': filename, // Slack上でのファイルのタイトル
+    "thread_ts": event_ts
+  };
+
+  // Slack APIへのリクエストで使用するオプションを設定する
+  var options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    "method": "post", // HTTPのPOSTメソッドを使用する
+    "headers": {
+      "Authorization": "Bearer " + token // Slack APIトークンを使用する
+    },
+    'contentType': 'application/x-www-form-urlencoded', // コンテンツタイプを指定する
+    "payload": payload // リクエストペイロードを設定する
+  };
+
+  try {
+    // Postリクエストを送信する
+    UrlFetchApp.fetch(SLACK_API_ENDPOINT, options);
+  } catch (e) {
+    console.error(e); // エラーが発生した場合は、コンソールにエラーを出力する
+  }
+}
+
+// main.ts
+
+function doPost(e: PostEvent) {
   // Slackからのイベントを取得する
   const postDataContents = JSON.parse(e.postData.contents);
 
@@ -48,7 +231,7 @@ function isDuplicateSlackEvent(slackEvent: SlackEvent) {
   return false
 }
 
-function handleEvent(postDataContents:PostDataContents) {
+function handleEvent(postDataContents: PostDataContents) {
   // Slackから送信されたイベントを取得する
   const slackEvent = postDataContents.event;
   const ts = slackEvent.thread_ts || slackEvent.ts;
@@ -107,7 +290,7 @@ function handleEvent(postDataContents:PostDataContents) {
   }
 }
 
-function handleAiResponse(message:string, slackEvent:SlackEvent) {
+function handleAiResponse(message: string, slackEvent: SlackEvent) {
   // AIの返信の種類と含まれる命令を判定する
   // AIのメッセージの一行目には/agent XX YYのようなエージェントへの命令か、/humanという人間への返信かを区別する情報を含む。
   // これを処理して適切なアウトプットにつなげる。
@@ -148,7 +331,7 @@ function handleAiResponse(message:string, slackEvent:SlackEvent) {
  * @param {string} message - 送信するメッセージ
  * @return {string} GPT-3からのレスポンス
  */
-function fetchGpt3Message(prompt:string) {
+function fetchGpt3Message(prompt: string) {
   // GPT-3のエンドポイントURL
   const uri = 'https://api.openai.com/v1/completions';
   // OpenAIのAPIキー
@@ -175,7 +358,7 @@ function fetchGpt3Message(prompt:string) {
     stop: ["\nAI:", "\nHuman:", "\nTool:"] // AIが一人で会話を続けないようにします。
   };
   // HTTPリクエストで使用するオプション
-  const options:GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
     muteHttpExceptions: true, // HTTPエラーを無視する
     headers: headers, // ヘッダーを指定する
     method: "post", // HTTPメソッドを指定する
@@ -216,7 +399,7 @@ function fetchUsageFromDec() {
   const endpoint = "https://api.openai.com/v1/usage?start_date=" + startDate + "&end_date=" + endDate;
 
   // HTTP リクエストを作成
-  const options:GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
     method: "get",
     headers: {
       Authorization: "Bearer " + apiKey
@@ -236,7 +419,7 @@ function fetchUsageFromDec() {
   return usage
 }
 
-function makePrompt(messages:string[], aiPrefix = "AI:") {
+function makePrompt(messages: string[], aiPrefix = "AI:") {
   const prompt = `以下はHumanと、AIの対話です。AIは賢くHumanに従順で、簡潔に受け答えし、必要なtoolを利用して返答します。AIは以下ルールを守ります。\n`
     + `- 返答の1行目は必ず/xxx args1 args2 ...等という形で、メッセージの種別と必要な引数を記載する。(xxxにはツール名、argsには必要な引数が入る)\n`
     + `- toolが使える場合は、できる限り積極的にtoolを活用する。\n`
@@ -255,7 +438,7 @@ function makePrompt(messages:string[], aiPrefix = "AI:") {
   return prompt
 }
 
-function getAndAddMessages(cacheKey:string, newMessage?:string) {
+function getAndAddMessages(cacheKey: string, newMessage?: string) {
   const cache = CacheService.getScriptCache();
   const prevMessagesString = cache.get(cacheKey); //同じcacheKeyでストアされているデータをゲットする（無ければNULLになる）
   // キャッシュには文字列で入っているため、パースして、配列として取得する。
