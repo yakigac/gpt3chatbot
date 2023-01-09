@@ -2,26 +2,40 @@
 
 Slackから、GASを経由してGPT3のレスポンスを返すプログラム。
 
+## 概要
 
-## 必要手順
+![image](https://user-images.githubusercontent.com/10434946/211309598-246e8766-cac1-476b-a28e-13b3610bf630.png)
+
+### このプログラムでできること
+
+・Slackを使った会話形式でのGPT3とのやり取り
+・プログラムをSlackのスニペットで返してもらう
+
+### このプログラムで（現状）できないこと
+
+・GPT3のツール利用をGPT3に直接渡す処理（現状は人間→GPT3→ツール→人間のみ）
+
+## 利用手順
 
 ### Google Apps Scriptでの初期設定
 
-1. GASプロジェクトを作成する。
-1. GASプロジェクトに、Slack APIを使用するためのスクリプトを追加する。
-1. 公開設定でデプロイし、GASプロジェクトの公開URLをメモしておく。
+1. [Google Apps Script](https://script.google.com/home)のページからプロジェクトを作成する。
+1. GASプロジェクトに、スクリプトを追加する。
+1. 「種類の選択：ウェブアプリ」「アクセスできるユーザー：全員」の設定でデプロイし、GASプロジェクトの公開URLをメモする。
 
 ### Slackでの初期設定
 
-1. Slack APIサイトにアクセスし、「Create an App」ボタンをクリックする。
-1. アプリ名を入力し、アプリを作成するワークスペースを選択する。
-1. アプリを作成すると、Slack APIのトークンが表示されるので、これをメモしておく。
-1. Slackの「Event Subscriptions」を有効にし、GASプロジェクトの公開URLを設定する
+1. [Slackのアプリ管理画面](https://api.slack.com/apps)にアクセスし、「Create New App」からSlackアプリを作成する。
+1. 「Event Subscriptions」画面の「Enable Events」をオンにし、「Request URL」にGASプロジェクトの公開URLをペーストする。
+1. 「Subscribe to bot events」の「Add Bot User Event」から「app_mention」を追加し、「Save changes」をクリックして保存する。
+1. 「Install App」からワークスペースにアプリをインストールする。
+1. 「Bot User OAuth Token」をGASプロジェクトの「プロジェクトの設定」から「スクリプトプロパティ」に「SLACK_TOKEN」として登録する。
 
 ### OPENAIでの初期設定
 
-TODO
+1. [Open AIのAPI key管理画面](https://beta.openai.com/account/api-keys)にアクセスし、「Create a new secret key」をクリックする。
+1. 「Secret key」をGASプロジェクトの「プロジェクトの設定」から「スクリプトプロパティ」に「OPENAI_SECRET_KEY」として登録する。
 
-### 繋ぎこみ
+### typescriptのビルド設定
 
 TODO
